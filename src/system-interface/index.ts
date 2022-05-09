@@ -1,10 +1,11 @@
+import { MemoryAccessWidth } from "../pipeline/memory-access";
 import { toHexString } from "../utils";
 import { RAMDevice } from "./ram";
 import { ROMDevice } from "./rom";
 
 export interface MMIODevice {
-    read(address: number): number;
-    write(address: number, value: number): void;
+    read(address: number, width: MemoryAccessWidth): number;
+    write(address: number, value: number, width: MemoryAccessWidth): void;
 }
 
 export enum MemoryMap {
@@ -23,32 +24,23 @@ export class SystemInterface implements MMIODevice {
         this.ram = ram;
     }
 
-    read(address: number): number {
-        // check alignment.  throw up for now
-        if ((address & 0b11) !== 0) {
-            throw new Error(`Unaligned read from address 0x${toHexString(address)}`)
-        }
-
+    read(address: number, width: MemoryAccessWidth): number {
         if ((address & MemoryMap.ProgramROMStart) === MemoryMap.ProgramROMStart) {
             // Why shifting 2 bits? to 4 byte align?
-            return this.rom.read((address & 0x0fffffff) >> 2);
+            return this.rom.read(address & 0x0fffffff, width);
         }
 
         if ((address & MemoryMap.RAMStart) === MemoryMap.RAMStart) {
             // Why shifting 2 bits? to 4 byte align?
-            return this.ram.read((address & 0x0fffffff) >> 2);
+            return this.ram.read(address & 0x0fffffff, width);
         }
 
         return 0;
     }
-    write(address: number, value: number): void {
-        if ((address & 0b11) !== 0) {
-            throw new Error(`Unaligned read from address 0x${toHexString(address)} (value=0x${toHexString(value)})`)
-        }
-
+    write(address: number, value: number, width: MemoryAccessWidth): void {
         if ((address & MemoryMap.RAMStart) === MemoryMap.RAMStart) {
             // Why shifting 2 bits? to 4 byte align?
-            return this.ram.write((address & 0x0fffffff) >> 2, value);
+            return this.ram.write(address & 0x0fffffff, value, width);
         }
     }
 }

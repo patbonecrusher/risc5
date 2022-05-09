@@ -1,6 +1,6 @@
 import { Register32 } from "../register32";
 import { MemoryMap, SystemInterface } from "../system-interface";
-import { twos, untwos } from "../utils";
+import { boolToInt, toHexString, twos, untwos } from "../utils";
 import { Decode } from "./decode";
 import { PipelineStage } from "./pipeline-stage";
 
@@ -25,13 +25,15 @@ export class Execute extends PipelineStage {
     private getDecodedValuesIn: ExecuteParams['getDecodedValuesIn'];
 
     private aluResult = new Register32(0);
-    private aluResultNext = new Register32(0);
-
-    private rd = 0;
-    private rdNext = 0;
-
-    private isAluOperation = false;
-    private isAluOperationNext = false;
+    private rd = new Register32(0);
+    private rs1 = new Register32(0);
+    private rs2 = new Register32(0);
+    private isAluOperation = new Register32(0);
+    private isStore = new Register32(0);
+    private isLoad = new Register32(0);
+    private isLUI = new Register32(0);
+    private imm32 = new Register32(0);
+    private funct3 = new Register32(0);
 
     constructor(params: ExecuteParams) {
         super();
@@ -42,66 +44,74 @@ export class Execute extends PipelineStage {
     compute(): void {
         if (!this.shouldStall()) {
             const decoded = this.getDecodedValuesIn();
-            this.rdNext = decoded.rd;
+
+            const imm32 = decoded.imm32;
+            
+            this.rd.value = decoded.rd;
+            this.isAluOperation.value = decoded.isAluOperation;
+            this.isStore.value = decoded.isStore;
+            this.isLoad.value = decoded.isLoad;
+            this.isLUI.value = decoded.isLUI;
+            this.imm32.value = decoded.imm32;
+            this.funct3.value = decoded.funct3;
+            this.rs1.value = decoded.rs1;
+            this.rs2.value = decoded.rs2;
+            
 
             const isRegisterOp = Boolean((decoded.opcode >> 5) & 0x1);
             const isAlternate = Boolean((decoded.imm11_0 >> 10) & 0x1);
 
-            const imm32 = twos((decoded.imm11_0 << 20) >> 20);
-
-            this.isAluOperationNext = (decoded.opcode & 0b1011111) === 0b0010011;
-
             switch (decoded.funct3) {
                 case ALUOperation.ADD: {
                     if (isRegisterOp) {
-                        this.aluResultNext.value = isAlternate ? decoded.rs1 - decoded.rs2 : decoded.rs1 + decoded.rs2;
+                        this.aluResult.value = isAlternate ? decoded.rs1 - decoded.rs2 : decoded.rs1 + decoded.rs2;
                     } else {
-                        this.aluResultNext.value = decoded.rs1 + imm32;
+                        this.aluResult.value = decoded.rs1 + imm32;
                     }
                     break;
                 };
                 case ALUOperation.SLL: {
-                    this.aluResultNext.value = isRegisterOp 
-                        ? twos(decoded.rs1 << decoded.rs2) 
-                        : twos(decoded.rs1 << decoded.shamt);
+                    this.aluResult.value = isRegisterOp 
+                        ? decoded.rs1 << decoded.rs2
+                        : decoded.rs1 << decoded.shamt;
                     break;
                 };
                 case ALUOperation.SLT: {
-                    this.aluResultNext.value = isRegisterOp 
+                    this.aluResult.value = isRegisterOp 
                         ? Number(untwos(decoded.rs1) < untwos(decoded.rs2))
                         : Number(untwos(decoded.rs1) < untwos(imm32));
                     break;
                 };
                 case ALUOperation.SLTU: {
-                    this.aluResultNext.value = isRegisterOp 
+                    this.aluResult.value = isRegisterOp 
                         ? Number(decoded.rs1 < decoded.rs2)
                         : Number(decoded.rs1 < imm32);
                     break;
                 };
                 case ALUOperation.XOR: {
-                    this.aluResultNext.value = isRegisterOp 
-                        ? twos(decoded.rs1 ^ decoded.rs2)
-                        : twos(decoded.rs1 ^ imm32);
+                    this.aluResult.value = isRegisterOp 
+                        ?  decoded.rs1 ^ decoded.rs2
+                        :  decoded.rs1 ^ imm32;
                     break;
                 };
                 case ALUOperation.SR: {
-                    this.aluResultNext.value = isRegisterOp 
+                    this.aluResult.value = isRegisterOp 
                     ? isAlternate
-                        ? twos(decoded.rs1 >> decoded.rs2)
+                        ? decoded.rs1 >> decoded.rs2
                         : decoded.rs1 >>> decoded.rs2
                     : decoded.rs1 >>> decoded.shamt;
                     break;
                 };
                 case ALUOperation.OR: {
-                    this.aluResultNext.value = isRegisterOp 
-                        ? twos(decoded.rs1 | decoded.rs2)
-                        : twos(decoded.rs1 | imm32);
+                    this.aluResult.value = isRegisterOp 
+                        ? decoded.rs1 | decoded.rs2
+                        : decoded.rs1 | imm32;
                     break;
                 };
                 case ALUOperation.AND: {
-                    this.aluResultNext.value = isRegisterOp 
-                        ? twos(decoded.rs1 & decoded.rs2)
-                        : twos(decoded.rs1 & imm32);
+                    this.aluResult.value = isRegisterOp 
+                        ? decoded.rs1 & decoded.rs2
+                        : decoded.rs1 & imm32;
                     break;
                 };
             }
@@ -109,16 +119,30 @@ export class Execute extends PipelineStage {
     }
 
     latchNext(): void {
-        this.aluResult = this.aluResultNext;
-        this.rd = this.rdNext;
-        this.isAluOperation = this.isAluOperationNext;
+        this.aluResult.latchNext();
+        this.rd.latchNext();
+        this.isAluOperation.latchNext();
+        this.isStore.latchNext();
+        this.isLoad.latchNext();
+        this.isLUI.latchNext();
+        this.imm32.latchNext();
+        this.funct3.latchNext();
+        this.rs1.latchNext();
+        this.rs2.latchNext();
     }
 
     getExecutionValuesOut() { 
         return {
             aluResult: this.aluResult.value,
-            rd: this.rd,
-            isAluOperation: this.isAluOperation,
+            rd: this.rd.value,
+            isAluOperation: this.isAluOperation.value,
+            isStore: this.isStore.value,
+            isLoad: this.isLoad.value,
+            isLUI: this.isLUI.value,
+            imm32: this.imm32.value,
+            funct3: this.funct3.value,
+            rs1: this.rs1.value,
+            rs2: this.rs2.value,
         }
     };
 
